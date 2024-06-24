@@ -815,6 +815,9 @@ int do_remount_sb2(struct vfsmount *mnt, struct super_block *sb, int flags, void
 		if (force) {
 			sb->s_readonly_remount = 1;
 			smp_wmb();
+
+			if (sb->s_magic == F2FS_SUPER_MAGIC)
+				mnt = ERR_PTR(-EROFS);
 		} else {
 			retval = sb_prepare_remount_readonly(sb);
 			if (retval)
@@ -1044,7 +1047,7 @@ static int set_bdev_super(struct super_block *s, void *data)
 	 * We set the bdi here to the queue backing, file systems can
 	 * overwrite this in ->fill_super()
 	 */
-	s->s_bdi = &bdev_get_queue(s->s_bdev)->backing_dev_info;
+	s->s_bdi = bdev_get_queue(s->s_bdev)->backing_dev_info;
 	return 0;
 }
 

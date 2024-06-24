@@ -529,7 +529,7 @@ static const char *sdcardfs_follow_link(struct dentry *dentry, void **cookie)
 
 static int sdcardfs_permission_wrn(struct inode *inode, int mask)
 {
-	WARN_RATELIMIT(1, "sdcardfs does not support permission. Use permission2.\n");
+	pr_debug("sdcardfs does not support permission. Use permission2.\n");
 	return -EINVAL;
 }
 
@@ -558,10 +558,13 @@ static int sdcardfs_permission(struct vfsmount *mnt, struct inode *inode, int ma
 	struct inode tmp;
 	struct sdcardfs_inode_data *top = top_data_get(SDCARDFS_I(inode));
 
-	if (IS_ERR(mnt))
-		return PTR_ERR(mnt);
 	if (!top)
 		return -EINVAL;
+
+	if (IS_ERR(mnt)) {
+		data_put(top);
+		return PTR_ERR(mnt);
+	}
 
 	/*
 	 * Permission check on sdcardfs inode.
