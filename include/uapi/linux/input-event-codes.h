@@ -336,6 +336,8 @@
 
 #define KEY_MICMUTE		248	/* Mute / unmute the microphone */
 
+#define KEY_RECENT		254
+
 /* Code 255 is reserved for special needs of AT keyboard driver */
 
 #define BTN_MISC		0x100
@@ -395,6 +397,7 @@
 #define BTN_MODE		0x13c
 #define BTN_THUMBL		0x13d
 #define BTN_THUMBR		0x13e
+#define BTN_GAME		0x13f
 
 #define BTN_DIGI		0x140
 #define BTN_TOOL_PEN		0x140
@@ -684,6 +687,26 @@
 #define BTN_TRIGGER_HAPPY39		0x2e6
 #define BTN_TRIGGER_HAPPY40		0x2e7
 
+/* Custom fingerprint gestures keys */
+#define KEY_FP_GESTURE_UP		0x2e8
+#define KEY_FP_GESTURE_DOWN		0x2e9
+#define KEY_FP_GESTURE_LEFT		0x2ea
+#define KEY_FP_GESTURE_RIGHT		0x2eb
+#define KEY_FP_GESTURE_LONG_PRESS	0x2ec
+#define KEY_FP_GESTURE_TAP		0x2ed
+/*HS60 code for SR-ZQL1695-01000000493 by zhanghao6 at 20190712 start*/
+#define KEY_SWTP_IN     		0x2ee
+#define KEY_SWTP_OUT    		0x2ef
+/*HS60 code for SR-ZQL1695-01000000493 by zhanghao6 at 20190712 end*/
+
+/*HS60 code for AR-ZQL1695-01000000070 by zhuqiang at 2019/7/18 start*/
+#ifdef HQ_FACTORY_BUILD
+#define KEY_SAR_CLOSE           0x2f0
+#define KEY_SAR_BODY            0x2f1
+#define KEY_SAR_FAR             0x2f2
+#endif
+/*HS60 code for AR-ZQL1695-01000000070 by zhuqiang at 2019/7/18 end*/
+
 /* We avoid low common keys in module aliases so they don't get huge. */
 #define KEY_MIN_INTERESTING	KEY_MUTE
 #define KEY_MAX			0x2ff
@@ -763,6 +786,7 @@
 #define ABS_MT_DISTANCE		0x3b	/* Contact hover distance */
 #define ABS_MT_TOOL_X		0x3c	/* Center X tool position */
 #define ABS_MT_TOOL_Y		0x3d	/* Center Y tool position */
+#define ABS_MT_CUSTOM	0x3e/* custom event HS60 add */
 
 
 #define ABS_MAX			0x3f
@@ -790,7 +814,11 @@
 #define SW_LINEIN_INSERT	0x0d  /* set = inserted */
 #define SW_MUTE_DEVICE		0x0e  /* set = device disabled */
 #define SW_PEN_INSERTED		0x0f  /* set = pen inserted */
-#define SW_MAX			0x0f
+#define SW_HPHL_OVERCURRENT	0x10  /* set = over current on left hph */
+#define SW_HPHR_OVERCURRENT	0x11  /* set = over current on right hph */
+#define SW_MICROPHONE2_INSERT   0x12  /* set = inserted */
+#define SW_UNSUPPORT_INSERT	0x13  /* set = unsupported device inserted */
+#define SW_MAX			0x20
 #define SW_CNT			(SW_MAX+1)
 
 /*
