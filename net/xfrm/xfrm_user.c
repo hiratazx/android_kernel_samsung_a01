@@ -914,6 +914,12 @@ static int copy_to_user_state_extra(struct xfrm_state *x,
 
 	if (x->security)
 		ret = copy_sec_ctx(x->security, skb);
+	if (x->props.output_mark) {
+		ret = nla_put_u32(skb, XFRMA_OUTPUT_MARK, x->props.output_mark);
+		if (ret)
+			goto out;
+	}
+
 out:
 	return ret;
 }
@@ -2568,11 +2574,6 @@ static int xfrm_user_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 	struct nlattr *attrs[XFRMA_MAX+1];
 	const struct xfrm_link *link;
 	int type, err;
-
-#ifdef CONFIG_COMPAT
-	if (in_compat_syscall())
-		return -EOPNOTSUPP;
-#endif
 
 	type = nlh->nlmsg_type;
 	if (type > XFRM_MSG_MAX)
