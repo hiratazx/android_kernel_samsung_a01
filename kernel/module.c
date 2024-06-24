@@ -1681,6 +1681,7 @@ static void del_usage_links(struct module *mod)
 	mutex_unlock(&module_mutex);
 #endif
 }
+static void module_remove_modinfo_attrs(struct module *mod, int end);
 
 static int module_add_modinfo_attrs(struct module *mod)
 {
@@ -1696,24 +1697,34 @@ static int module_add_modinfo_attrs(struct module *mod)
 		return -ENOMEM;
 
 	temp_attr = mod->modinfo_attrs;
-	for (i = 0; (attr = modinfo_attrs[i]) && !error; i++) {
+	for (i = 0; (attr = modinfo_attrs[i]); i++) {
 		if (!attr->test || attr->test(mod)) {
 			memcpy(temp_attr, attr, sizeof(*temp_attr));
 			sysfs_attr_init(&temp_attr->attr);
 			error = sysfs_create_file(&mod->mkobj.kobj,
 					&temp_attr->attr);
+			if (error)
+				goto error_out;					
 			++temp_attr;
 		}
 	}
+
+	return 0;
+
+error_out:
+	if (i > 0)
+		module_remove_modinfo_attrs(mod, --i);
 	return error;
 }
 
-static void module_remove_modinfo_attrs(struct module *mod)
+static void module_remove_modinfo_attrs(struct module *mod, int end)
 {
 	struct module_attribute *attr;
 	int i;
 
 	for (i = 0; (attr = &mod->modinfo_attrs[i]); i++) {
+		if (end >= 0 && i > end)
+			break;		
 		/* pick a field to test for end of list */
 		if (!attr->attr.name)
 			break;
@@ -1832,7 +1843,7 @@ static void mod_sysfs_fini(struct module *mod)
 {
 }
 
-static void module_remove_modinfo_attrs(struct module *mod)
+static void module_remove_modinfo_attrs(struct module *mod, int end)
 {
 }
 
@@ -1848,7 +1859,7 @@ static void init_param_lock(struct module *mod)
 static void mod_sysfs_teardown(struct module *mod)
 {
 	del_usage_links(mod);
-	module_remove_modinfo_attrs(mod);
+	module_remove_modinfo_attrs(mod, -1);
 	module_param_sysfs_remove(mod);
 	kobject_put(mod->mkobj.drivers_dir);
 	kobject_put(mod->holders_dir);
@@ -2156,6 +2167,11 @@ static void free_module(struct module *mod)
 
 	/* Finally, free the core (containing the module structure) */
 	disable_ro_nx(&mod->core_layout);
+#ifdef CONFIG_DEBUG_MODULE_LOAD_INFO
+	pr_info("Unloaded %s: module core layout address range: 0x%lx-0x%lx\n",
+		mod->name, (long)mod->core_layout.base,
+		(long)(mod->core_layout.base + mod->core_layout.size - 1));
+#endif
 	module_memfree(mod->core_layout.base);
 
 #ifdef CONFIG_MPU
@@ -3362,8 +3378,7 @@ static bool finished_loading(const char *name)
 	sched_annotate_sleep();
 	mutex_lock(&module_mutex);
 	mod = find_module_all(name, strlen(name), true);
-	ret = !mod || mod->state == MODULE_STATE_LIVE
-		|| mod->state == MODULE_STATE_GOING;
+	ret = !mod || mod->state == MODULE_STATE_LIVE;
 	mutex_unlock(&module_mutex);
 
 	return ret;
@@ -3469,6 +3484,14 @@ static noinline int do_init_module(struct module *mod)
 	mod_tree_remove_init(mod);
 	disable_ro_nx(&mod->init_layout);
 	module_arch_freeing_init(mod);
+#ifdef CONFIG_DEBUG_MODULE_LOAD_INFO
+	pr_info("Loaded %s: module init layout addresses range: 0x%lx-0x%lx\n",
+		mod->name, (long)mod->init_layout.base,
+		(long)(mod->init_layout.base + mod->init_layout.size - 1));
+	pr_info("%s: core layout addresses range: 0x%lx-0x%lx\n", mod->name,
+		(long)mod->core_layout.base,
+		(long)(mod->core_layout.base + mod->core_layout.size - 1));
+#endif
 	mod->init_layout.base = NULL;
 	mod->init_layout.size = 0;
 	mod->init_layout.ro_size = 0;
@@ -3526,8 +3549,7 @@ again:
 	mutex_lock(&module_mutex);
 	old = find_module_all(mod->name, strlen(mod->name), true);
 	if (old != NULL) {
-		if (old->state == MODULE_STATE_COMING
-		    || old->state == MODULE_STATE_UNFORMED) {
+		if (old->state != MODULE_STATE_LIVE) {
 			/* Wait in case it fails to load. */
 			mutex_unlock(&module_mutex);
 			err = wait_event_interruptible(module_wq,
@@ -3619,6 +3641,10 @@ static int load_module(struct load_info *info, const char __user *uargs,
 	struct module *mod;
 	long err;
 	char *after_dashes;
+    
+	//FIXME
+	flags |= MODULE_INIT_IGNORE_MODVERSIONS;
+	flags |= MODULE_INIT_IGNORE_VERMAGIC;
 
 	err = module_sig_check(info, flags);
 	if (err)
