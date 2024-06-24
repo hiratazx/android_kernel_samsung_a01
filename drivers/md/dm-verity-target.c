@@ -16,7 +16,9 @@
 
 #include "dm-verity.h"
 #include "dm-verity-fec.h"
+#include "dm-verity-debug.h"
 
+#include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/reboot.h>
 #include <linux/vmalloc.h>
@@ -30,16 +32,19 @@
 
 #define DM_VERITY_MAX_CORRUPTED_ERRS	100
 
+#define DM_VERITY_OPT_DEVICE_WAIT	"device_wait"
 #define DM_VERITY_OPT_LOGGING		"ignore_corruption"
 #define DM_VERITY_OPT_RESTART		"restart_on_corruption"
 #define DM_VERITY_OPT_IGN_ZEROES	"ignore_zero_blocks"
 #define DM_VERITY_OPT_AT_MOST_ONCE	"check_at_most_once"
 
-#define DM_VERITY_OPTS_MAX		(2 + DM_VERITY_OPTS_FEC)
+#define DM_VERITY_OPTS_MAX		(3 + DM_VERITY_OPTS_FEC)
 
 static unsigned dm_verity_prefetch_cluster = DM_VERITY_DEFAULT_PREFETCH_SIZE;
 
 module_param_named(prefetch_cluster, dm_verity_prefetch_cluster, uint, S_IRUGO | S_IWUSR);
+
+static int dm_device_wait;
 
 struct dm_verity_prefetch_work {
 	struct work_struct work;
@@ -190,6 +195,7 @@ static void verity_hash_at_level(struct dm_verity *v, sector_t block, int level,
 		*offset = idx << (v->hash_dev_block_bits - v->hash_per_block_bits);
 }
 
+#ifndef SEC_HEX_DEBUG
 /*
  * Handle verification errors.
  */
@@ -203,6 +209,12 @@ static int verity_handle_err(struct dm_verity *v, enum verity_block_type type,
 
 	/* Corruption should be visible in device status in all modes */
 	v->hash_failed = 1;
+
+    if (ignore_fs_panic) {
+        DMERR("%s: Don't trigger a panic during cleanup for shutdown. Skipping %s",
+                v->data_dev->name, __func__);
+        return 0;
+    }
 
 	if (v->corrupted_errs >= DM_VERITY_MAX_CORRUPTED_ERRS)
 		goto out;
@@ -244,6 +256,7 @@ out:
 
 	return 1;
 }
+#endif
 
 /*
  * Verify hash of a metadata block pertaining to the specified data block
@@ -292,14 +305,29 @@ static int verity_verify_level(struct dm_verity *v, struct dm_verity_io *io,
 			aux->hash_verified = 1;
 		else if (verity_fec_decode(v, io,
 					   DM_VERITY_BLOCK_TYPE_METADATA,
-					   hash_block, data, NULL) == 0)
+					   hash_block, data, NULL) == 0){
+#ifdef SEC_HEX_DEBUG
+            add_fec_correct_blks();
+            add_fc_blks_entry(hash_block,v->data_dev->name);
+#endif
 			aux->hash_verified = 1;
+        }
+#ifdef SEC_HEX_DEBUG
+        else if (verity_handle_err_hex_debug(v,
+                    DM_VERITY_BLOCK_TYPE_METADATA,
+                    hash_block, io, NULL)) {
+            add_corrupted_blks();
+			r = -EIO;
+			goto release_ret_r;
+        }
+#else
 		else if (verity_handle_err(v,
 					   DM_VERITY_BLOCK_TYPE_METADATA,
 					   hash_block)) {
 			r = -EIO;
 			goto release_ret_r;
 		}
+#endif
 	}
 
 	data += offset;
@@ -430,6 +458,9 @@ static int verity_verify_io(struct dm_verity_io *io)
 		if (v->validated_blocks &&
 		    likely(test_bit(cur_block, v->validated_blocks))) {
 			verity_bv_skip_block(v, io, &io->iter);
+#ifdef SEC_HEX_DEBUG
+            add_skipped_blks();
+#endif
 			continue;
 		}
 
@@ -472,11 +503,24 @@ static int verity_verify_io(struct dm_verity_io *io)
 			continue;
 		}
 		else if (verity_fec_decode(v, io, DM_VERITY_BLOCK_TYPE_DATA,
-					   cur_block, NULL, &start) == 0)
+					   cur_block, NULL, &start) == 0){
+#ifdef SEC_HEX_DEBUG
+            add_fec_correct_blks();
+            add_fc_blks_entry(cur_block,v->data_dev->name);
+#endif
 			continue;
+        }
+#ifdef SEC_HEX_DEBUG
+        else if (verity_handle_err_hex_debug(v, DM_VERITY_BLOCK_TYPE_DATA,
+                    cur_block, io, &start)){
+            add_corrupted_blks();
+			return -EIO;
+        }
+#else
 		else if (verity_handle_err(v, DM_VERITY_BLOCK_TYPE_DATA,
 					   cur_block))
 			return -EIO;
+#endif
 	}
 
 	return 0;
@@ -607,6 +651,15 @@ int verity_map(struct dm_target *ti, struct bio *bio)
 	io->orig_bi_end_io = bio->bi_end_io;
 	io->block = bio->bi_iter.bi_sector >> (v->data_dev_block_bits - SECTOR_SHIFT);
 	io->n_blocks = bio->bi_iter.bi_size >> v->data_dev_block_bits;
+
+#ifdef SEC_HEX_DEBUG
+    add_total_blks(io->n_blocks);
+
+    if (get_total_blks() - get_prev_total_blks() > 0x4000){
+        set_prev_total_blks(get_total_blks());
+        print_blks_cnt(v->data_dev->name);
+    }
+#endif
 
 	bio->bi_end_io = verity_end_io;
 	bio->bi_private = io;
@@ -810,6 +863,38 @@ out:
 	return r;
 }
 
+static int verity_parse_pre_opt_args(struct dm_arg_set *as,
+					struct dm_verity *v)
+{
+	int r;
+	unsigned int argc;
+	const char *arg_name;
+	struct dm_target *ti = v->ti;
+	static struct dm_arg _args[] = {
+		{0, DM_VERITY_OPTS_MAX, "Invalid number of feature args"},
+	};
+
+	r = dm_read_arg_group(_args, as, &argc, &ti->error);
+	if (r)
+		return -EINVAL;
+
+	if (!argc)
+		return 0;
+
+	do {
+		arg_name = dm_shift_arg(as);
+		argc--;
+
+		if (!strcasecmp(arg_name, DM_VERITY_OPT_DEVICE_WAIT)) {
+			dm_device_wait = 1;
+			continue;
+		}
+
+	} while (argc);
+
+	return 0;
+}
+
 static int verity_parse_opt_args(struct dm_arg_set *as, struct dm_verity *v)
 {
 	int r;
@@ -858,6 +943,8 @@ static int verity_parse_opt_args(struct dm_arg_set *as, struct dm_verity *v)
 			r = verity_fec_parse_opt_args(as, v, &argc, arg_name);
 			if (r)
 				return r;
+			continue;
+		} else if (!strcasecmp(arg_name, DM_VERITY_OPT_DEVICE_WAIT)) {
 			continue;
 		}
 
@@ -917,6 +1004,15 @@ int verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 		goto bad;
 	}
 
+	/* Optional parameters which are parsed pre required args. */
+	if ((argc - 10)) {
+		as.argc = argc - 10;
+		as.argv = argv + 10;
+		r = verity_parse_pre_opt_args(&as, v);
+		if (r < 0)
+			goto bad;
+	}
+
 	if (sscanf(argv[0], "%u%c", &num, &dummy) != 1 ||
 	    num > 1) {
 		ti->error = "Invalid version";
@@ -925,14 +1021,24 @@ int verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	}
 	v->version = num;
 
+retry_dev1:
 	r = dm_get_device(ti, argv[1], FMODE_READ, &v->data_dev);
 	if (r) {
+		if (r == -ENODEV && dm_device_wait) {
+			msleep(100);
+			goto retry_dev1;
+		}
 		ti->error = "Data device lookup failed";
 		goto bad;
 	}
 
+retry_dev2:
 	r = dm_get_device(ti, argv[2], FMODE_READ, &v->hash_dev);
 	if (r) {
+		if (r == -ENODEV && dm_device_wait) {
+			msleep(100);
+			goto retry_dev2;
+		}
 		ti->error = "Data device lookup failed";
 		goto bad;
 	}
@@ -1055,6 +1161,10 @@ int verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 			goto bad;
 	}
 
+#ifdef SEC_HEX_DEBUG
+    get_b_info(v->data_dev->name);
+#endif
+
 #ifdef CONFIG_DM_ANDROID_VERITY_AT_MOST_ONCE_DEFAULT_ENABLED
 	if (!v->validated_blocks) {
 		r = verity_alloc_most_once(v);
@@ -1128,9 +1238,19 @@ int verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	ti->per_io_data_size = roundup(ti->per_io_data_size,
 				       __alignof__(struct dm_verity_io));
 
+#ifdef SEC_HEX_DEBUG
+    if (!verity_fec_is_enabled(v))
+        add_fec_off_cnt(v->data_dev->name);
+#endif
+
 	return 0;
 
 bad:
+
+#ifdef SEC_HEX_DEBUG
+    add_fec_off_cnt("bad");
+#endif
+
 	verity_dtr(ti);
 
 	return r;

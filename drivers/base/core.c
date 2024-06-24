@@ -72,6 +72,11 @@ int lock_device_hotplug_sysfs(void)
 	return restart_syscall();
 }
 
+void lock_device_hotplug_assert(void)
+{
+	lockdep_assert_held(&device_hotplug_lock);
+}
+
 #ifdef CONFIG_BLOCK
 static inline int device_is_not_partition(struct device *dev)
 {
@@ -862,7 +867,9 @@ static void cleanup_glue_dir(struct device *dev, struct kobject *glue_dir)
 		return;
 
 	mutex_lock(&gdp_mutex);
-	if (!kobject_has_children(glue_dir))
+	/* HS60 modify for HS60-1138 import patch solve kobject bug by xudayi at 2019/09/17 start */
+	if (!kobject_has_children(glue_dir) && atomic_read(&glue_dir->kref.refcount) == 1)
+	/* HS60 modify for HS60-1138 import patch solve kobject bug by xudayi at 2019/09/17 end */
 		kobject_del(glue_dir);
 	kobject_put(glue_dir);
 	mutex_unlock(&gdp_mutex);
@@ -873,8 +880,8 @@ static int device_add_class_symlinks(struct device *dev)
 	struct device_node *of_node = dev_of_node(dev);
 	int error;
 
-	if (of_node) {
-		error = sysfs_create_link(&dev->kobj, &of_node->kobj,"of_node");
+	if (of_node && of_node_kobj(of_node)) {
+		error = sysfs_create_link(&dev->kobj, of_node_kobj(of_node), "of_node");
 		if (error)
 			dev_warn(dev, "Error %d creating of_node link\n",error);
 		/* An error here doesn't warrant bringing down the device */
