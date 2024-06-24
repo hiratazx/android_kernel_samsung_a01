@@ -221,6 +221,20 @@ config GENERIC_SMP_IDLE_THREAD
 config GENERIC_IDLE_POLL_SETUP
        bool
 
+config ARCH_HAS_FORTIFY_SOURCE
+	bool
+	help
+	  An architecture should select this when it can successfully
+	  build and run with CONFIG_FORTIFY_SOURCE.
+
+config FORTIFY_COMPILE_CHECK
+	depends on ARCH_HAS_FORTIFY_SOURCE
+	bool
+	help
+	  Disable compile time size check for string routines as part
+	  of fortify source. Selecting this option will not enforce compile
+	  time size check for string functions.
+
 # Select if arch init_task initializer is different to init/init_task.c
 config ARCH_INIT_TASK
        bool
@@ -841,4 +855,27 @@ config VMAP_STACK
 	  the stack to map directly to the KASAN shadow map using a formula
 	  that is incorrect if the stack is in vmalloc space.
 
+# huaqin added by lanshiming for H000001 at 20180719 start
+# HS70 code added by tangqingyong for HS70-11 at 20191008 start
+config ARCH_ZQL1695
+	default n
+	bool "Samsung ZQL1695 Project"
+	help
+	  Support for Samsung ZQL1695 Project
+# HS70 code added by tangqingyong for HS70-11 at 20191008 end
+# huaqin added by lanshiming for H000001 at 20180719 end
+# HS70 code added by tangqingyong for HS70-9 at 20191002 start
+config ARCH_ZQL1871
+	default n
+	bool "Samsung ZQL1871 Project"
+	help
+	  Support for Samsung ZQL1871 Project
+# HS70 code added by tangqingyong for HS70-9 at 20191002 end
+# HS70 code add for HS70-120 add camera node by chengzhi at 20191002 start
+config MSM_CAMERA_HS70ADDNODE
+	default n
+	bool "Samsung ZQL1871 Project"
+	help
+	  Support for Samsung ZQL1871 Project
+# HS70 code add for HS70-120 add camera node by chengzhi at 20191002 end
 source "kernel/gcov/Kconfig"
